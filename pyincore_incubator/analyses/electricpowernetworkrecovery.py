@@ -15,18 +15,20 @@ from pyincore import BaseAnalysis
 warnings.filterwarnings("ignore")
 
 
-class PowerNetworkAnalysis(BaseAnalysis):
-    """PowerNetworkAnalysis for power network recovery."""
+class PowerNetworkRecoveryAnalysis(BaseAnalysis):
+    """PowerNetworkRecoveryAnalysis class for power network recovery."""
 
     def __init__(self, incore_client):
-        super(PowerNetworkAnalysis, self).__init__(incore_client)
+        super(PowerNetworkRecoveryAnalysis, self).__init__(incore_client)
         self.crs = 'epsg:4326'
         self.sample_num = 10
+        self.num_crew = 20
         self.seed_num = 1234
 
     def run(self):
         """Executes power network analysis."""
         self.sample_num = self.get_parameter("num_samples")
+        self.num_crew = self.get_parameter("num_crews")
         node_data = self.get_input_dataset("nodes").get_dataframe_from_shapefile()
         edge_data = self.get_input_dataset("edges").get_dataframe_from_shapefile()
         building_data = self.get_input_dataset("buildings").get_dataframe_from_shapefile()
@@ -52,10 +54,10 @@ class PowerNetworkAnalysis(BaseAnalysis):
 
         # Generate final outputs
         self.set_result_csv_data(
-            "result", result_list, name=self.get_parameter("result_name") + "_average_return_time_in_days"
+            "result", samples_list, name=self.get_parameter("result_name") + "_all_samples"
         )
         self.set_result_csv_data(
-            "result", samples_list, name=self.get_parameter("result_name") + "_all_samples"
+            "result", result_list, name=self.get_parameter("result_name") + "_average_return_time_in_days"
         )
 
         return True
@@ -87,6 +89,12 @@ class PowerNetworkAnalysis(BaseAnalysis):
                     "id": "num_samples",
                     "required": True,
                     "description": "Number of samples to run",
+                    "type": int,
+                },
+                {
+                    "id": "num_crews",
+                    "required": True,
+                    "description": "Number of crews for power pole restoration",
                     "type": int,
                 },
                 {
@@ -227,21 +235,21 @@ class PowerNetworkAnalysis(BaseAnalysis):
         _, node_idx = graph_kdtree.query([building_point.x, building_point.y])
         return graph_nodes[node_idx]
 
-    def repair_time_power(self, road_num_pr, N_crews):
+    def repair_time_power(self, road_num_pr, num_crew):
         # repair time model inspired from a matlab code by Yousef Darestani
         if road_num_pr.size == 0:
             return np.array([])
         else:
             pr = road_num_pr.reshape((-1, 1))
-            t_repair = np.zeros((int(np.ceil(pr.size / N_crews)) + 1, N_crews))
-            j = N_crews
+            t_repair = np.zeros((int(np.ceil(pr.size / num_crew)) + 1, num_crew))
+            j = num_crew
 
-            for i in range(int(np.ceil(pr.size / N_crews))):
+            for i in range(int(np.ceil(pr.size / num_crew))):
                 # Define an empty numpy array to store the lengths of the matched roads
                 lengths_temp = np.array([])
 
-                start_index = i * N_crews
-                end_index = (i + 1) * N_crews
+                start_index = i * num_crew
+                end_index = (i + 1) * num_crew
                 indices = pr[start_index:end_index]
 
                 # evaluate the repair time
@@ -252,7 +260,7 @@ class PowerNetworkAnalysis(BaseAnalysis):
                     axis=0)
 
                 prr = pr[(i) * j + 1:]
-                j = min(N_crews, prr.size)
+                j = min(num_crew, prr.size)
 
             t_repair2 = t_repair[1:, :].T.reshape((-1, 1))
             Output1 = pr.reshape((-1, 1))
@@ -303,7 +311,7 @@ class PowerNetworkAnalysis(BaseAnalysis):
 
     def restore_nodes_and_update_power(self, G_temp, prioritized_nodes, node_importance_array, time_step,
                                        failure_link_dict):
-        cumulative_time = self.repair_time_power(node_importance_array, 20)
+        cumulative_time = self.repair_time_power(node_importance_array, self.num_crew)
         time_day = 0
         visited_nodes = set()
         waiting_list = deque()
